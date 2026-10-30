@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Webhook Delivery Engine - Live Console</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background-color: #090d16; color: #f1f5f9; font-family: system-ui, -apple-system, sans-serif; }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+  <!-- Top Navbar -->
+  <header class="border-b border-slate-800 bg-slate-900/60 px-6 py-4 flex items-center justify-between sticky top-0 z-20 backdrop-blur">
+    <div class="flex items-center gap-3">
+      <div class="p-2 bg-indigo-600/20 border border-indigo-500/40 rounded-lg text-indigo-400">
+        <svg class="w-5 h-5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+      </div>
+      <div>
+        <h1 class="text-lg font-bold text-white flex items-center gap-2">
+          Webhook Delivery Engine
+          <span class="text-[10px] px-2 py-0.5 rounded-full bg-indigo-950 text-indigo-400 border border-indigo-800 font-mono">Go + Next.js</span>
+        </h1>
+        <p class="text-xs text-slate-400">High-throughput dispatcher with HMAC-SHA256 & Exponential Backoff</p>
+      </div>
+    </div>
+    <div class="flex items-center gap-3">
+      <button onclick="fetchData()" class="px-3 py-2 text-xs rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 transition">Refresh</button>
+      <button onclick="dispatchDemoEvent()" class="px-4 py-2 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg transition">Dispatch Demo Event</button>
+    </div>
+  </header>
+
+  <!-- Content -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-6 py-8 space-y-8">
+    <!-- Metrics Grid -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div class="p-5 rounded-xl border border-slate-800 bg-slate-900/40">
+        <div class="text-xs text-slate-400">Active Endpoints</div>
+        <div id="metric-endpoints" class="text-2xl font-bold mt-2 text-white">0</div>
+        <div class="text-[11px] text-slate-500 mt-1">Configured webhook targets</div>
+      </div>
+      <div class="p-5 rounded-xl border border-slate-800 bg-slate-900/40">
+        <div class="text-xs text-slate-400">Total Deliveries</div>
+        <div id="metric-attempts" class="text-2xl font-bold mt-2 text-white">0</div>
+        <div class="text-[11px] text-slate-500 mt-1">Across all events & retries</div>
+      </div>
+      <div class="p-5 rounded-xl border border-slate-800 bg-slate-900/40">
+        <div class="text-xs text-slate-400">Success Rate</div>
+        <div id="metric-success-rate" class="text-2xl font-bold mt-2 text-emerald-400">100%</div>
+        <div id="metric-success-sub" class="text-[11px] text-slate-500 mt-1">0 successful</div>
+      </div>
+      <div class="p-5 rounded-xl border border-slate-800 bg-slate-900/40">
+        <div class="text-xs text-slate-400">Average Latency</div>
+        <div id="metric-latency" class="text-2xl font-bold mt-2 text-white">< 5 ms</div>
+        <div class="text-[11px] text-slate-500 mt-1">End-to-end HTTP response time</div>
+      </div>
+    </div>
+
+    <!-- Live Deliveries Table -->
+    <div class="space-y-4">
+      <div class="flex items-center justify-between">
+        <h2 class="text-base font-semibold text-white">Live Delivery Attempts (Real-Time Feed)</h2>
+        <span class="text-xs text-emerald-400 flex items-center gap-1">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span> Connected to Backend (:8080)
+        </span>
+      </div>
+      <div class="rounded-xl border border-slate-800 bg-slate-900/30 overflow-hidden">
+        <table class="w-full text-left text-xs border-collapse">
+          <thead>
+            <tr class="bg-slate-900/80 border-b border-slate-800 text-slate-400 font-semibold uppercase tracking-wider">
+              <th class="py-3 px-4">Status</th>
+              <th class="py-3 px-4">Event Type</th>
+              <th class="py-3 px-4">Endpoint Target</th>
+              <th class="py-3 px-4">Attempt</th>
+              <th class="py-3 px-4">Latency</th>
+              <th class="py-3 px-4">Timestamp</th>
+              <th class="py-3 px-4 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="attempts-tbody" class="divide-y divide-slate-800/60 font-mono">
+            <tr>
+              <td colspan="7" class="py-8 text-center text-slate-500 font-sans">Connecting to Webhook Engine...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const API = 'http://localhost:8080';
+
+    async function fetchData() {
+      try {
+        const [statsRes, attemptsRes] = await Promise.all([
+          fetch(`${API}/api/v1/stats`),
+          fetch(`${API}/api/v1/attempts?limit=50`)
+        ]);
+        if (statsRes.ok) {
+          const s = await statsRes.json();
+          document.getElementById('metric-endpoints').innerText = s.total_endpoints || 0;
+          document.getElementById('metric-attempts').innerText = s.total_attempts || 0;
+          const rate = s.total_attempts > 0 ? Math.round((s.successful_attempts / s.total_attempts) * 100) : 100;
+          document.getElementById('metric-success-rate').innerText = rate + '%';
+          document.getElementById('metric-success-sub').innerText = `${s.successful_attempts} successful / ${s.failed_attempts} failed`;
+          document.getElementById('metric-latency').innerText = s.average_latency_ms ? s.average_latency_ms.toFixed(1) + ' ms' : '< 5 ms';
+        }
+        if (attemptsRes.ok) {
+          const json = await attemptsRes.json();
+          renderAttempts(json.data || []);
+        }
+      } catch (err) {
+        document.getElementById('attempts-tbody').innerHTML = `
+          <tr><td colspan="7" class="py-8 text-center text-red-400 font-sans">
+            Could not connect to Go backend on http://localhost:8080.<br>
+            Please run the Go server: <code>cd backend && go run ./cmd/server/main.go</code>
+          </td></tr>`;
+      }
+    }
+
+    function renderAttempts(list) {
+      if (list.length === 0) {
+        document.getElementById('attempts-tbody').innerHTML = `
+          <tr><td colspan="7" class="py-8 text-center text-slate-500 font-sans">
+            No delivery attempts yet. Click "Dispatch Demo Event" above!
+          </td></tr>`;
+        return;
+      }
+      document.getElementById('attempts-tbody').innerHTML = list.map(a => {
+        let badge = `<span class="px-2 py-0.5 rounded-full text-[11px] bg-emerald-950 text-emerald-400 border border-emerald-800">2xx OK (${a.status_code})</span>`;
+        if (a.status === 'retrying') badge = `<span class="px-2 py-0.5 rounded-full text-[11px] bg-amber-950 text-amber-400 border border-amber-800 animate-pulse">Retrying</span>`;
+        if (a.status === 'dead_letter') badge = `<span class="px-2 py-0.5 rounded-full text-[11px] bg-red-950 text-red-400 border border-red-800">Dead Letter</span>`;
+        
+        return `
+          <tr class="hover:bg-slate-800/40 transition">
+            <td class="py-3 px-4">${badge}</td>
+            <td class="py-3 px-4 text-white font-semibold">${a.event_type}</td>
+            <td class="py-3 px-4 text-slate-400 truncate max-w-xs">${a.endpoint_url}</td>
+            <td class="py-3 px-4 text-slate-300">#${a.attempt_number} of ${a.max_attempts}</td>
+            <td class="py-3 px-4 text-slate-300">${a.latency_ms > 0 ? a.latency_ms + 'ms' : '-'}</td>
+            <td class="py-3 px-4 text-slate-400 text-[11px]">${new Date(a.created_at).toLocaleTimeString()}</td>
+            <td class="py-3 px-4 text-right">
+              ${(a.status === 'failed' || a.status === 'dead_letter') ? `<button onclick="retryAttempt('${a.id}')" class="px-2.5 py-1 rounded bg-indigo-900/60 hover:bg-indigo-800 text-indigo-300 text-xs">Replay</button>` : ''}
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    async function dispatchDemoEvent() {
+      await fetch(`${API}/api/v1/events`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event_type: 'payment.succeeded',
+          payload: { order_id: 'ord_' + Math.floor(Math.random() * 900000), amount: 150000, currency: 'IDR' }
+        })
+      });
+      setTimeout(fetchData, 300);
+    }
+
+    async function retryAttempt(id) {
+      await fetch(`${API}/api/v1/attempts/${id}/retry`, { method: 'POST' });
+      setTimeout(fetchData, 300);
+    }
+
+    fetchData();
+    setInterval(fetchData, 2500);
+  </script>
+</body>
+</html>
